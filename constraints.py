@@ -14,8 +14,8 @@ class Constraints:
 
         courses = self.data["courses"]
         rooms = self.data["rooms"]
-        time_slots = self.data.get("time_slots", [])
-        days = self.data.get("time_config", {}).get("days", [])
+        # time_slots = self.data.get("time_slots", [])
+        # days = self.data.get("time_config", {}).get("days", [])
 
         # 1) Room No-Overlap:
         # ห้องเดียวกันห้ามมีวิชาซ้อนทับกันในช่วงเวลาเดียวกัน
@@ -68,37 +68,61 @@ class Constraints:
                     [act["interval"] for act in activities.values()]
                 ).OnlyEnforceIf(a_self)
 
+        # 4) Capacity Constraint:
+        # ห้องต้องมีความจุ >= จำนวนนักศึกษาในวิชานั้น
+        for c in courses:
+            c_id = c["id"]
+            enrollment = self._to_int(c.get("ลง", 0))
+            activities = self.all_vars[c_id]["activities"]
+            for act in activities.values():
+                for r in rooms:
+                    r_id = r["id"]
+                    capacity = self._to_int(r.get("จำนวนที่นั่ง", 0))
+                    if capacity and enrollment and capacity < enrollment:
+                        a_capacity = self._assumption(
+                            "capacity_constraint",
+                            detail={
+                                "course": c_id,
+                                "room_id": r_id,
+                                "enrollment": enrollment,
+                                "capacity": capacity,
+                            },
+                        )
+                        # ถ้าห้องเล็กเกินไป ห้ามเลือกห้องนั้น
+                        self.model.Add(
+                            act["rooms"][r_id]["is_present"] == 0
+                        ).OnlyEnforceIf(a_capacity)
         # 4) Day-Bound (Time Slot Continuity):
         # ป้องกันการข้ามวัน โดยบังคับให้ start และ end-1 อยู่วันเดียวกัน
-        if time_slots and days:
-            day_index = {d: i for i, d in enumerate(days)}
-            slot_day_idx = [day_index.get(s["day"], 0) for s in time_slots]
-            tuples = [(i, slot_day_idx[i]) for i in range(len(time_slots))]
-            a_day = self._assumption("day_bound")
-            for c in courses:
-                c_id = c["id"]
-                activities = self.all_vars[c_id]["activities"]
-                for act_id, act in activities.items():
-                    start = act["start"]
-                    end_minus_1 = self.model.NewIntVar(
-                        0, len(time_slots) - 1, f"endm1_{act_id}"
-                    )
-                    self.model.Add(end_minus_1 == act["end"] - 1).OnlyEnforceIf(
-                        a_day
-                    )
-                    start_day = self.model.NewIntVar(
-                        0, len(days) - 1, f"day_s_{act_id}"
-                    )
-                    end_day = self.model.NewIntVar(
-                        0, len(days) - 1, f"day_e_{act_id}"
-                    )
-                    self.model.AddAllowedAssignments([start, start_day], tuples).OnlyEnforceIf(
-                        a_day
-                    )
-                    self.model.AddAllowedAssignments([end_minus_1, end_day], tuples).OnlyEnforceIf(
-                        a_day
-                    )
-                    self.model.Add(start_day == end_day).OnlyEnforceIf(a_day)
+        # if time_slots and days:
+        #     day_index = {d: i for i, d in enumerate(days)}
+        #     slot_day_idx = [day_index.get(s["day"], 0) for s in time_slots]
+        #     tuples = [(i, slot_day_idx[i]) for i in range(len(time_slots))]
+        #     a_day = self._assumption("day_bound")
+        #     for c in courses:
+        #         c_id = c["id"]
+        #         activities = self.all_vars[c_id]["activities"]
+        #         for act_id, act in activities.items():
+        #             start = act["start"]
+        #             end_minus_1 = self.model.NewIntVar(
+        #                 0, len(time_slots) - 1, f"endm1_{act_id}"
+        #             )
+        #             self.model.Add(end_minus_1 == act["end"] - 1).OnlyEnforceIf(
+        #                 a_day
+        #             )
+        #             start_day = self.model.NewIntVar(
+        #                 0, len(days) - 1, f"day_s_{act_id}"
+        #             )
+        #             end_day = self.model.NewIntVar(
+        #                 0, len(days) - 1, f"day_e_{act_id}"
+        #             )
+        #             self.model.AddAllowedAssignments([start, start_day], tuples).OnlyEnforceIf(
+        #                 a_day
+        #             )
+        #             self.model.AddAllowedAssignments([end_minus_1, end_day], tuples).OnlyEnforceIf(
+        #                 a_day
+        #             )
+        #             self.model.Add(start_day == end_day).OnlyEnforceIf(a_day)
 
         # 5) Course Completion (L/P):
         # ทุกกิจกรรม (Lecture/Lab) ต้องถูกจัดลงห้องอย่างน้อย 1 ห้อง
